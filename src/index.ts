@@ -242,7 +242,7 @@ app.get('/', (c) => {
 
         /* 内容区 */
         .main-content { 
-          padding: 40px 60px 100px 50px; 
+          padding: 40px 60px 100px 30px; 
           z-index: 2; 
           height: 100vh;
           overflow-y: auto; 
