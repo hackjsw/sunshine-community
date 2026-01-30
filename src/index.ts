@@ -7,7 +7,7 @@ type Bindings = {
   JWT_SECRET: string
 }
 
-const DEFAULT_SECRET = "sunshine-secret-key-2026-v17-nickname";
+const DEFAULT_SECRET = "sunshine-secret-key-2026-v18-comprehensive";
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/*', cors())
@@ -47,7 +47,6 @@ app.get('/api/admin/dashboard', authRequired, async (c) => {
   const setting = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'allow_register'").first();
   const allowRegister = !setting || setting.value === 'true';
 
-  // [新增] 管理员面板同时也查出 nickname
   const sql = `SELECT u.id, u.username, u.nickname, u.role, u.created_at, COUNT(m.id) as memo_count FROM users u LEFT JOIN memos m ON u.id = m.user_id GROUP BY u.id ORDER BY u.created_at DESC`;
   const { results } = await c.env.DB.prepare(sql).all();
   return c.json({ allowRegister, users: results });
@@ -71,34 +70,25 @@ app.delete('/api/admin/users/:id', authRequired, async (c) => {
   return c.json({ success: true });
 });
 
-// [新增] 修改个人昵称
 app.put('/api/auth/profile', authRequired, async (c) => {
   const user = c.get('user');
   const { nickname } = await c.req.json();
   if (!nickname || nickname.trim() === "") return c.json({ error: '昵称不能为空' }, 400);
-  
   await c.env.DB.prepare("UPDATE users SET nickname = ? WHERE id = ?").bind(nickname, user.id).run();
   return c.json({ success: true, nickname });
 });
 
 app.post('/api/auth/register', async (c) => {
-  // [新增] 接收 nickname
   const { username, password, nickname } = await c.req.json();
   if (!username || !password) return c.json({ error: '请输入账号密码' }, 400);
-  
   const setting = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'allow_register'").first();
   if (setting && setting.value === 'false') return c.json({ error: '管理员已关闭注册通道 🚫' }, 403);
-  
   const exist = await c.env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(username).first();
   if (exist) return c.json({ error: '用户名已存在' }, 409);
-  
   const pwdHash = await hashPassword(password);
   const userCount = await c.env.DB.prepare("SELECT COUNT(*) as count FROM users").first();
   const role = (userCount as any).count === 0 ? 'admin' : 'user';
-  
-  // 插入 nickname (如果没有填，默认为 null，前端会回退显示 username)
   const finalNickname = nickname || null;
-
   try {
     await c.env.DB.prepare("INSERT INTO users (username, password, nickname, role, created_at) VALUES (?, ?, ?, ?, ?)").bind(username, pwdHash, finalNickname, role, Date.now()).run();
     return c.json({ success: true });
@@ -108,19 +98,13 @@ app.post('/api/auth/register', async (c) => {
 app.post('/api/auth/login', async (c) => {
   const { username, password } = await c.req.json();
   const pwdHash = await hashPassword(password);
-  // [新增] 查出 nickname
   const user = await c.env.DB.prepare("SELECT id, username, nickname, role FROM users WHERE username = ? AND password = ?").bind(username, pwdHash).first();
-  
   if (!user) return c.json({ error: '账号或密码错误' }, 401);
-  
   const token = await sign({ id: user.id, username: user.username, role: user.role, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7 }, c.env.JWT_SECRET || DEFAULT_SECRET, "HS256");
-  
-  // 返回用户信息包含 nickname
   return c.json({ token, user: { id: user.id, username: user.username, nickname: user.nickname, role: user.role } });
 });
 
 app.get('/api/auth/me', authRequired, async (c) => {
-    // 重新查库获取最新昵称
     const payload = c.get('user');
     const user = await c.env.DB.prepare("SELECT id, username, nickname, role FROM users WHERE id = ?").bind(payload.id).first();
     return c.json({ user });
@@ -129,17 +113,12 @@ app.get('/api/auth/me', authRequired, async (c) => {
 app.get('/api/memos', async (c) => {
   const user = c.get('user');
   const query = c.req.query('q');
-  
-  // [新增] 联表查询 u.nickname
   let sql = "SELECT m.id, m.content, m.tags, m.is_private, m.created_at, m.user_id, u.username, u.nickname, u.role as user_role FROM memos m LEFT JOIN users u ON m.user_id = u.id";
   let conditions = ["(m.is_private = 0 OR m.user_id = ?)"];
   let params: any[] = [user ? user.id : -1];
-
   if (query) { conditions.push("m.content LIKE ?"); params.push(`%${query}%`); }
-
   sql += " WHERE " + conditions.join(" AND ");
   sql += " ORDER BY m.created_at DESC LIMIT 200";
-
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(results);
 });
@@ -313,6 +292,19 @@ app.get('/', (c) => {
         .emoji-item { cursor: pointer; font-size: 1.4rem; text-align: center; padding: 4px; border-radius: 6px; transition:0.1s;}
         .emoji-item:hover { background: #f0f2f5; transform:scale(1.2); }
 
+        /* [新增] Toast 提示样式 */
+        .toast-container {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 9999; pointer-events: none;
+        }
+        .toast {
+            background: rgba(30, 30, 30, 0.9); color: white; padding: 10px 20px;
+            border-radius: 50px; margin-bottom: 10px; font-size: 0.9rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2); opacity: 0; transform: translateY(-20px);
+            transition: all 0.3s ease; display: flex; align-items: center; gap: 8px;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+
         .glass-card, .search-box input, #editor-container { max-width: 750px; width: 100%; }
 
         .glass-card {
@@ -379,6 +371,8 @@ app.get('/', (c) => {
 
       <div id="mouse-light"></div>
       <div class="blobs"><div class="blob b1"></div><div class="blob b2"></div></div>
+      
+      <div class="toast-container" id="toast-container"></div>
 
       <div class="layout">
         <aside class="sidebar">
@@ -406,13 +400,13 @@ app.get('/', (c) => {
           <div id="editor-container" style="display:none">
             <div class="glass-card">
               <div class="editor-toolbar">
-                <button onclick="insertMarkdown('bold')" title="加粗"><b>B</b></button>
-                <button onclick="insertMarkdown('italic')" title="斜体"><i>I</i></button>
-                <button onclick="insertMarkdown('list')" title="列表">≡</button>
-                <button onclick="insertMarkdown('quote')" title="引用">“</button>
-                <button onclick="insertMarkdown('code')" title="代码">&lt;/&gt;</button>
-                <button onclick="insertMarkdown('link')" title="链接">🔗</button>
-                <div style="flex:1"></div>
+                <button onclick="insertMarkdown('bold')" title="加粗 (Bold)"><b>B</b></button>
+                <button onclick="insertMarkdown('italic')" title="斜体 (Italic)"><i>I</i></button>
+                <button onclick="insertMarkdown('list')" title="列表 (List)">≡</button>
+                <button onclick="insertMarkdown('task')" title="任务 (Task)">☑️</button> <button onclick="insertMarkdown('quote')" title="引用 (Quote)">“</button>
+                <button onclick="insertMarkdown('code')" title="代码 (Code)">&lt;/&gt;</button>
+                <button onclick="insertMarkdown('link')" title="链接 (Link)">🔗</button>
+                <button onclick="insertMarkdown('image')" title="图片 (Image)">🖼️</button> <div style="flex:1"></div>
                 <button onclick="toggleEmojiPicker()" title="Emoji">😀</button>
               </div>
               
@@ -525,7 +519,7 @@ app.get('/', (c) => {
           }
           renderAuthUI();
           loadMemos();
-          initEmojiPicker(); // 初始化
+          initEmojiPicker(); 
           document.addEventListener('mousemove', handleGlobalMouseMove);
           checkPermalink();
         }
@@ -546,17 +540,60 @@ app.get('/', (c) => {
             p.style.display = p.style.display === 'none' ? 'grid' : 'none';
         }
 
+        // [新增] Toast 提示函数
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = '✨ ' + message;
+            container.appendChild(toast);
+            
+            // 动画进入
+            requestAnimationFrame(() => toast.classList.add('show'));
+            
+            // 3秒后消失
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // [修改] 增强版 Markdown 插入逻辑
         function insertMarkdown(type) {
             let text = "";
+            let hint = "";
+            let offset = 0; // 光标回退位置
+
             switch(type) {
-                case 'bold': text = "**Bold**"; break;
-                case 'italic': text = "*Italic*"; break;
-                case 'list': text = "\\n- Item"; break;
-                case 'quote': text = "\\n> Quote"; break;
-                case 'code': text = "\`Code\`"; break;
-                case 'link': text = "[Link](url)"; break;
+                case 'bold': 
+                    text = "**Bold**"; hint = "已插入加粗"; 
+                    break;
+                case 'italic': 
+                    text = "*Italic*"; hint = "已插入斜体"; 
+                    break;
+                case 'list': 
+                    text = "\\n- Item"; hint = "已插入列表"; 
+                    break;
+                case 'task': 
+                    text = "\\n- [ ] Task"; hint = "已插入任务列表"; 
+                    break;
+                case 'quote': 
+                    text = "\\n> Quote"; hint = "已插入引用"; 
+                    break;
+                case 'code': 
+                    text = "\`Code\`"; hint = "已插入代码块"; 
+                    break;
+                case 'link': 
+                    text = "[Link](url)"; hint = "已插入链接"; 
+                    break;
+                case 'image': 
+                    text = "![Description](https://example.com/image.png)"; 
+                    hint = "📸 已插入图片，请替换链接"; 
+                    // 智能选区逻辑稍微复杂点，这里先简化
+                    break;
             }
             insertText(text);
+            showToast(hint);
         }
 
         function insertText(text) {
@@ -565,7 +602,15 @@ app.get('/', (c) => {
             const end = textarea.selectionEnd;
             const val = textarea.value;
             textarea.value = val.substring(0, start) + text + val.substring(end);
-            textarea.selectionStart = textarea.selectionEnd = start + text.length;
+            
+            // 如果是图片，尝试选中 url 部分方便用户直接粘贴
+            if (text.includes("http")) {
+                const urlStart = start + text.indexOf("http");
+                const urlEnd = start + text.length - 1;
+                textarea.setSelectionRange(urlStart, urlEnd);
+            } else {
+                textarea.selectionStart = textarea.selectionEnd = start + text.length;
+            }
             textarea.focus();
         }
 
@@ -611,7 +656,6 @@ app.get('/', (c) => {
             });
         }
 
-        // [修改] 获取显示名称 helper
         function getDisplayName(user) {
             return user.nickname && user.nickname.trim() !== "" ? user.nickname : user.username;
         }
@@ -623,7 +667,6 @@ app.get('/', (c) => {
           
           if (currentUser) {
             let adminHtml = currentUser.role === 'admin' ? \`<div class="admin-trigger" onclick="openAdminPanel()">⚡ Admin</div>\` : '';
-            // 显示昵称，点击可修改
             const displayName = getDisplayName(currentUser);
             container.innerHTML = \`
               <div style="display:flex; align-items:center">
@@ -652,7 +695,8 @@ app.get('/', (c) => {
                     const data = await res.json();
                     currentUser.nickname = data.nickname;
                     renderAuthUI();
-                    loadMemos(); // 刷新列表以更新名字
+                    loadMemos();
+                    showToast("Nickname updated! 🎉");
                 } else {
                     alert('Update failed');
                 }
@@ -705,7 +749,6 @@ app.get('/', (c) => {
             if (memo.user_role === 'admin') badge = '<span class="user-badge admin-badge">⚡ Admin</span>';
             if (isPrivate) badge += ' <span class="lock-icon">🔒</span>';
 
-            // [修改] 显示昵称
             const displayName = memo.nickname || memo.username;
 
             let actions = '';
@@ -743,7 +786,7 @@ app.get('/', (c) => {
 
         function shareMemo(id) {
             const url = window.location.origin + '?memo=' + id;
-            navigator.clipboard.writeText(url).then(() => { alert('链接已复制，快去分享吧！ ✨'); });
+            navigator.clipboard.writeText(url).then(() => { showToast('链接已复制到剪贴板 🔗'); });
         }
 
         function enableEdit(id) {
@@ -757,7 +800,7 @@ app.get('/', (c) => {
            const newContent = document.getElementById(\`edit-area-\${id}\`).value;
            if(!newContent) return;
            const res = await fetch(\`/api/memos/\${id}\`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') }, body: JSON.stringify({ content: newContent }) });
-           if(res.ok) loadMemos(); else alert('保存失败');
+           if(res.ok) { loadMemos(); showToast('保存成功 ✅'); } else alert('保存失败');
         }
 
         async function openAdminPanel() {
@@ -772,7 +815,6 @@ app.get('/', (c) => {
                 div.className = 'admin-user-item';
                 const roleTag = u.role === 'admin' ? '<span style="color:orange; font-weight:bold">[Admin]</span>' : '';
                 const delBtn = u.role !== 'admin' ? \`<button class="btn-del-user" onclick="deleteUser(\${u.id})">Delete</button>\` : '<span style="color:#ccc; font-size:0.8rem">不可删</span>';
-                // Admin 列表也显示昵称
                 const display = u.nickname ? \`\${u.nickname} (@\${u.username})\` : u.username;
                 div.innerHTML = \`<div>\${display} \${roleTag} <span style="font-size:0.8em; color:#999; margin-left:10px">记忆数: \${u.memo_count}</span></div>\${delBtn}\`;
                 listEl.appendChild(div);
@@ -787,7 +829,7 @@ app.get('/', (c) => {
         async function deleteUser(id) {
             if(!confirm('确定删除该用户及其所有记忆吗？此操作不可逆！')) return;
             const res = await fetch(\`/api/admin/users/\${id}\`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
-            if(res.ok) { openAdminPanel(); loadMemos(); } else alert('删除失败');
+            if(res.ok) { openAdminPanel(); loadMemos(); showToast("用户已删除"); } else alert('删除失败');
         }
 
         function renderTimeline(data) {
@@ -814,14 +856,18 @@ app.get('/', (c) => {
           const content = document.getElementById('post-content').value;
           const isPrivate = document.getElementById('post-private').checked;
           const res = await fetch('/api/memos', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') }, body: JSON.stringify({ content, is_private: isPrivate }) });
-          if(res.ok) { document.getElementById('post-content').value = ''; loadMemos(); } 
+          if(res.ok) { 
+              document.getElementById('post-content').value = ''; 
+              loadMemos(); 
+              showToast('发布成功！🎉');
+          } 
           else { const data = await res.json(); if(res.status === 401) { alert('登录失效'); logout(); } else alert(data.error || '发布失败'); }
         }
 
         async function deleteMemo(id) {
           if(!confirm('确定删除吗？')) return;
           const res = await fetch(\`/api/memos/\${id}\`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
-          if(res.ok) loadMemos(); else { if(res.status === 401) { alert('登录失效'); logout(); } else alert('删除失败'); }
+          if(res.ok) { loadMemos(); showToast('记忆已删除 🗑️'); } else { if(res.status === 401) { alert('登录失效'); logout(); } else alert('删除失败'); }
         }
 
         function openModal(mode) { 
@@ -830,7 +876,6 @@ app.get('/', (c) => {
             document.getElementById('modal-title').innerText = isRegisterMode ? 'Join' : 'Welcome'; 
             document.getElementById('modal-submit-btn').innerText = isRegisterMode ? 'Register' : 'Login'; 
             document.getElementById('modal-switch-text').innerText = isRegisterMode ? 'Login ->' : 'Register ->'; 
-            // 注册模式显示昵称框
             document.getElementById('auth-nickname').style.display = isRegisterMode ? 'block' : 'none';
         }
         function closeModal() { document.getElementById('auth-modal').style.display = 'none'; }
@@ -840,15 +885,27 @@ app.get('/', (c) => {
         async function submitAuth() {
           const u = document.getElementById('auth-user').value;
           const p = document.getElementById('auth-pass').value;
-          const n = document.getElementById('auth-nickname').value; // 获取昵称
+          const n = document.getElementById('auth-nickname').value; 
           
           const endpoint = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
           const body = { username: u, password: p };
-          if(isRegisterMode) body.nickname = n; // 只有注册发昵称
+          if(isRegisterMode) body.nickname = n; 
 
           const res = await fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
           const data = await res.json();
-          if(res.ok) { if(isRegisterMode) { alert('注册成功'); toggleAuthMode(); } else { localStorage.setItem('token', data.token); currentUser = data.user; closeModal(); renderAuthUI(); loadMemos(); } } else alert(data.error);
+          if(res.ok) { 
+              if(isRegisterMode) { 
+                  showToast('注册成功，请登录 ✨'); 
+                  toggleAuthMode(); 
+              } else { 
+                  localStorage.setItem('token', data.token); 
+                  currentUser = data.user; 
+                  closeModal(); 
+                  renderAuthUI(); 
+                  loadMemos(); 
+                  showToast(\`欢迎回来, \${getDisplayName(currentUser)} 👋\`);
+              } 
+          } else alert(data.error);
         }
 
         function toggleHelp(e) { e.stopPropagation(); document.getElementById('help-popup').classList.toggle('show'); }
