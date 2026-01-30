@@ -1,7 +1,20 @@
 {
   "name": "brain-dump",
   "main": "src/index.ts",
-  "compatibility_date": "2024-08-06",
+  "compatibility_date": "2024-01-01",
+
+  // [新增 1] 彻底关闭 workers.dev 默认域名
+  "workers_dev": false,
+
+  // [新增 2] 绑定你的自定义域名
+  // 这样 wrangler deploy 时会自动配置好路由，不会报错
+  "routes": [
+    {
+      "pattern": "ss.869669.xyz",
+      "custom_domain": true
+    }
+  ],
+
   "d1_databases": [
     {
       "binding": "DB",

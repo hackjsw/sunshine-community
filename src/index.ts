@@ -7,7 +7,7 @@ type Bindings = {
   JWT_SECRET: string
 }
 
-const DEFAULT_SECRET = "sunshine-secret-key-2026-v18-comprehensive";
+const DEFAULT_SECRET = "sunshine-secret-key-2026-v24-auto-height";
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/*', cors())
@@ -162,7 +162,8 @@ app.get('/', (c) => {
     <html lang="zh">
     <head>
       <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta name="color-scheme" content="light">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
       <title>Sunshine Community</title>
       <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
       <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;700&display=swap" rel="stylesheet">
@@ -175,7 +176,12 @@ app.get('/', (c) => {
           --light-color: rgba(255, 250, 240, 0.5); 
         }
         * { box-sizing: border-box; }
-        body { margin: 0; font-family: 'Quicksand', sans-serif; background: #eef2f3; color: var(--text); overflow-x: hidden; }
+        
+        body { 
+            margin: 0; font-family: 'Quicksand', sans-serif; 
+            background: #eef2f3; color: var(--text); 
+            overflow: hidden; height: 100vh; width: 100vw;
+        }
 
         #mouse-light {
           position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0;
@@ -192,16 +198,19 @@ app.get('/', (c) => {
           grid-template-columns: 260px 1fr; 
           max-width: 1200px; 
           margin: 0 auto; 
-          min-height: 100vh; 
+          height: 100vh; 
           position: relative; 
           z-index: 1; 
+          transform: translateX(-30px); /* 整体左移 50px */
         }
 
         .sidebar { 
           position: sticky; top: 0; height: 100vh; 
           padding: 40px 30px; 
           border-right: 2px solid rgba(0,0,0,0.05); 
-          display: flex; flex-direction: column; align-items: flex-end; z-index: 2; 
+          display: flex; flex-direction: column; align-items: flex-end; z-index: 50; 
+          background: transparent;
+          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         
         #timeline-list { margin-top: 50px; }
@@ -233,9 +242,19 @@ app.get('/', (c) => {
         }
         .timeline-node:hover::after { background: var(--primary); transform: scale(1.2); }
 
+        /* 内容区 */
         .main-content { 
-          padding: 40px 60px 100px 80px; 
+          padding: 40px 60px 100px 50px; 
           z-index: 2; 
+          height: 100vh;
+          overflow-y: auto; 
+          scroll-behavior: smooth;
+          scrollbar-width: none; 
+          -ms-overflow-style: none; 
+        }
+        
+        .main-content::-webkit-scrollbar {
+            display: none; 
         }
 
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
@@ -292,7 +311,6 @@ app.get('/', (c) => {
         .emoji-item { cursor: pointer; font-size: 1.4rem; text-align: center; padding: 4px; border-radius: 6px; transition:0.1s;}
         .emoji-item:hover { background: #f0f2f5; transform:scale(1.2); }
 
-        /* [新增] Toast 提示样式 */
         .toast-container {
             position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
             z-index: 9999; pointer-events: none;
@@ -364,7 +382,52 @@ app.get('/', (c) => {
         .help-item { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.85rem; color: #555; align-items: center; }
         .help-code { background: #f0f2f5; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #e91e63; border: 1px solid #e1e4e8; }
 
-        @media (max-width: 800px) { .layout { grid-template-columns: 1fr; padding: 0 20px; } .sidebar { display: none; } }
+        .mobile-toggle { display: none !important; }
+        .sidebar-overlay { display: none; }
+
+        @media (max-width: 800px) { 
+            .layout { grid-template-columns: 1fr; }
+            
+            .mobile-toggle { 
+                display: flex !important; 
+                position: fixed; top: 15px; left: 15px; 
+                width: 40px; height: 40px; background: white; border-radius: 50%;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 1001;
+                justify-content: center; align-items: center; font-size: 1.2rem; cursor: pointer;
+            }
+
+            .sidebar { 
+                position: fixed; left: -220px; top: 0; 
+                width: 180px; 
+                height: 100%;
+                background: #ffffff !important; 
+                transition: 0.3s; 
+                z-index: 9999; 
+                box-shadow: 5px 0 20px rgba(0,0,0,0.1);
+                padding-top: 60px;
+                border-right: 1px solid rgba(0,0,0,0.05);
+            }
+            .sidebar.active { left: 0; }
+
+            .sidebar-overlay { 
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                background: rgba(0,0,0,0.3); 
+                z-index: 9998; 
+                opacity: 0; pointer-events: none; transition: 0.3s;
+            }
+            .sidebar-overlay.active { opacity: 1; pointer-events: auto; display: block; }
+
+            .main-content { 
+                padding: 80px 20px 100px 20px; 
+                width: 100%; 
+            }
+            
+            .header { flex-direction: column; gap: 10px; align-items: flex-start; margin-left: 40px;}
+            .toolbar { flex-direction: column; align-items: stretch; }
+            .search-box input { width: 100%; }
+            .filter-toggle { justify-content: center; }
+            .actions { opacity: 1; } 
+        }
       </style>
     </head>
     <body>
@@ -374,9 +437,12 @@ app.get('/', (c) => {
       
       <div class="toast-container" id="toast-container"></div>
 
+      <div class="mobile-toggle" onclick="toggleSidebar()">📅</div>
+      <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
       <div class="layout">
         <aside class="sidebar">
-          <div class="timeline-dot-now" onclick="scrollToTop()" title="Back to Now"></div>
+          <div class="timeline-dot-now" onclick="scrollToTop(); toggleSidebar()" title="Back to Now"></div>
           <div id="timeline-list"></div>
         </aside>
 
@@ -403,10 +469,12 @@ app.get('/', (c) => {
                 <button onclick="insertMarkdown('bold')" title="加粗 (Bold)"><b>B</b></button>
                 <button onclick="insertMarkdown('italic')" title="斜体 (Italic)"><i>I</i></button>
                 <button onclick="insertMarkdown('list')" title="列表 (List)">≡</button>
-                <button onclick="insertMarkdown('task')" title="任务 (Task)">☑️</button> <button onclick="insertMarkdown('quote')" title="引用 (Quote)">“</button>
+                <button onclick="insertMarkdown('task')" title="任务 (Task)">☑️</button> 
+                <button onclick="insertMarkdown('quote')" title="引用 (Quote)">“</button>
                 <button onclick="insertMarkdown('code')" title="代码 (Code)">&lt;/&gt;</button>
                 <button onclick="insertMarkdown('link')" title="链接 (Link)">🔗</button>
-                <button onclick="insertMarkdown('image')" title="图片 (Image)">🖼️</button> <div style="flex:1"></div>
+                <button onclick="insertMarkdown('image')" title="图片 (Image)">🖼️</button> 
+                <div style="flex:1"></div>
                 <button onclick="toggleEmojiPicker()" title="Emoji">😀</button>
               </div>
               
@@ -499,7 +567,7 @@ app.get('/', (c) => {
             "🙁","☹️","😣","😖","😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😶‍🌫️","😱","😨",
             "😰","😥","😓","🤗","🤔","🫣","🤭","🫢","🫡","🤫","🫠","🤥","😶","🫥","😐","😑","😬","🙄","😯","😦",
             "👍","👎","👏","🙌","🫶","👐","🤲","🤝","🙏","✍️","💪","🦾","🖕","💅","🤳","👀","🧠","🫀","🫁","🦷",
-            "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❤️‍🔥","❤️‍🩹","❣️","💕","💞","💓","💗","💖","💘","💝",
+            "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","🤎","💔","❤️‍🔥","❤️‍🩹","❣️","💕","💞","💓","💗","💖","💘","💝",
             "✨","⭐️","🌟","💫","⚡️","🔥","🌈","☀️","🌤","⛅️","☁️","🌦","🌧","⛈","🌩","🌨","❄️","☃️","⛄️","🌬",
             "🚀","🚁","🚂","🚃","🚄","🚅","🚆","🚇","🚈","🚉","🚊","🚝","🚞","🚋","🚌","🚍","🚎","🚐","🚑","🚒",
             "💻","🖥","🖨","🖱","⌨️","🕹","💽","💾","💿","📀","📼","📷","📸","📹","🎥","📽","🎞","📞","☎️","📟",
@@ -522,6 +590,21 @@ app.get('/', (c) => {
           initEmojiPicker(); 
           document.addEventListener('mousemove', handleGlobalMouseMove);
           checkPermalink();
+          
+          // [新增] 监听输入框自动高度
+          const textarea = document.getElementById('post-content');
+          textarea.addEventListener('input', () => autoResize(textarea));
+        }
+
+        // [新增] 自动调整高度函数
+        function autoResize(el) {
+            el.style.height = 'auto'; // 先重置高度
+            el.style.height = el.scrollHeight + 'px'; // 再设置为内容高度
+        }
+
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('active');
+            document.querySelector('.sidebar-overlay').classList.toggle('active');
         }
 
         function initEmojiPicker() {
@@ -540,57 +623,31 @@ app.get('/', (c) => {
             p.style.display = p.style.display === 'none' ? 'grid' : 'none';
         }
 
-        // [新增] Toast 提示函数
         function showToast(message) {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.innerHTML = '✨ ' + message;
             container.appendChild(toast);
-            
-            // 动画进入
             requestAnimationFrame(() => toast.classList.add('show'));
-            
-            // 3秒后消失
             setTimeout(() => {
                 toast.classList.remove('show');
                 setTimeout(() => toast.remove(), 300);
             }, 3000);
         }
 
-        // [修改] 增强版 Markdown 插入逻辑
         function insertMarkdown(type) {
             let text = "";
             let hint = "";
-            let offset = 0; // 光标回退位置
-
             switch(type) {
-                case 'bold': 
-                    text = "**Bold**"; hint = "已插入加粗"; 
-                    break;
-                case 'italic': 
-                    text = "*Italic*"; hint = "已插入斜体"; 
-                    break;
-                case 'list': 
-                    text = "\\n- Item"; hint = "已插入列表"; 
-                    break;
-                case 'task': 
-                    text = "\\n- [ ] Task"; hint = "已插入任务列表"; 
-                    break;
-                case 'quote': 
-                    text = "\\n> Quote"; hint = "已插入引用"; 
-                    break;
-                case 'code': 
-                    text = "\`Code\`"; hint = "已插入代码块"; 
-                    break;
-                case 'link': 
-                    text = "[Link](url)"; hint = "已插入链接"; 
-                    break;
-                case 'image': 
-                    text = "![Description](https://example.com/image.png)"; 
-                    hint = "📸 已插入图片，请替换链接"; 
-                    // 智能选区逻辑稍微复杂点，这里先简化
-                    break;
+                case 'bold': text = "**Bold**"; hint = "已插入加粗"; break;
+                case 'italic': text = "*Italic*"; hint = "已插入斜体"; break;
+                case 'list': text = "\\n- Item"; hint = "已插入列表"; break;
+                case 'task': text = "\\n- [ ] Task"; hint = "已插入任务列表"; break;
+                case 'quote': text = "\\n> Quote"; hint = "已插入引用"; break;
+                case 'code': text = "\`Code\`"; hint = "已插入代码块"; break;
+                case 'link': text = "[Link](url)"; hint = "已插入链接"; break;
+                case 'image': text = "![Description](https://example.com/image.png)"; hint = "📸 已插入图片，请替换链接"; break;
             }
             insertText(text);
             showToast(hint);
@@ -602,8 +659,6 @@ app.get('/', (c) => {
             const end = textarea.selectionEnd;
             const val = textarea.value;
             textarea.value = val.substring(0, start) + text + val.substring(end);
-            
-            // 如果是图片，尝试选中 url 部分方便用户直接粘贴
             if (text.includes("http")) {
                 const urlStart = start + text.indexOf("http");
                 const urlEnd = start + text.length - 1;
@@ -612,6 +667,7 @@ app.get('/', (c) => {
                 textarea.selectionStart = textarea.selectionEnd = start + text.length;
             }
             textarea.focus();
+            autoResize(textarea); // [新增] 插入文字后自动调整高度
         }
 
         function checkSubmit(e) {
@@ -634,7 +690,7 @@ app.get('/', (c) => {
                 const checkExist = setInterval(() => {
                     const el = document.getElementById('memo-' + memoId);
                     if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        document.querySelector('.main-content').scrollTo({ top: el.offsetTop - 100, behavior: 'smooth' });
                         el.classList.add('highlight');
                         setTimeout(() => el.classList.remove('highlight'), 2000);
                         clearInterval(checkExist);
@@ -845,12 +901,18 @@ app.get('/', (c) => {
             const node = document.createElement('div');
             node.className = 'timeline-node';
             node.innerText = \`\${g.year} . \${g.month}\`;
-            node.onclick = () => document.getElementById(\`memo-\${g.firstId}\`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            node.onclick = () => {
+                const el = document.getElementById(\`memo-\${g.firstId}\`);
+                if(el) {
+                    document.querySelector('.main-content').scrollTo({ top: el.offsetTop - 100, behavior: 'smooth' });
+                    if(window.innerWidth <= 800) toggleSidebar();
+                }
+            };
             sidebar.appendChild(node);
           });
         }
 
-        function scrollToTop() { window.scrollTo({ top: 0, behavior: 'smooth' }); }
+        function scrollToTop() { document.querySelector('.main-content').scrollTo({ top: 0, behavior: 'smooth' }); }
 
         async function postMemo() {
           const content = document.getElementById('post-content').value;
@@ -858,6 +920,8 @@ app.get('/', (c) => {
           const res = await fetch('/api/memos', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') }, body: JSON.stringify({ content, is_private: isPrivate }) });
           if(res.ok) { 
               document.getElementById('post-content').value = ''; 
+              // [新增] 发布后重置高度
+              document.getElementById('post-content').style.height = 'auto';
               loadMemos(); 
               showToast('发布成功！🎉');
           } 
