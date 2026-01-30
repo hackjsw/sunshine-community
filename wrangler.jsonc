@@ -1,0 +1,12 @@
+{
+  "name": "brain-dump",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-08-06",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "brain-dump",
+      "database_id": "3c6b0a01-ef1d-4cee-9c3c-a8bbcc410945"
+    }
+  ]
+}
