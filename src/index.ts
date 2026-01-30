@@ -7,7 +7,7 @@ type Bindings = {
   JWT_SECRET: string
 }
 
-const DEFAULT_SECRET = "sunshine-secret-key-2026-v24-auto-height";
+const DEFAULT_SECRET = "sunshine-secret-key-2026-v26-help-popup-fix";
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/*', cors())
@@ -200,8 +200,6 @@ app.get('/', (c) => {
           margin: 0 auto; 
           height: 100vh; 
           position: relative; 
-          z-index: 1; 
-          transform: translateX(-30px); /* 整体左移 50px */
         }
 
         .sidebar { 
@@ -376,7 +374,27 @@ app.get('/', (c) => {
         .help-wrapper { position: fixed; bottom: 30px; right: 30px; z-index: 100; }
         .help-btn { width: 50px; height: 50px; border-radius: 50%; background: var(--primary-grad); color: white; font-size: 24px; font-weight: bold; border: none; cursor: pointer; box-shadow: 0 4px 15px rgba(253, 160, 133, 0.5); display: flex; justify-content: center; align-items: center; transition: transform 0.3s; animation: pulse 3s infinite; }
         .help-btn:hover { transform: scale(1.1) rotate(10deg); }
-        .help-popup { position: absolute; bottom: 70px; right: 0; width: 450px; background: rgba(255, 255, 255, 0.98); backdrop-filter: blur(25px); border-radius: 20px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.8); opacity: 0; transform: translateY(20px) scale(0.9); pointer-events: none; transition: all 0.3s; transform-origin: bottom right; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        
+        /* [修复] 帮助弹窗样式 */
+        .help-popup { 
+            position: absolute; bottom: 70px; right: 0; 
+            width: 450px; /* PC默认宽度 */
+            max-width: 85vw; /* 关键：最大宽度不超过屏幕85% */
+            background: rgba(255, 255, 255, 0.98); 
+            backdrop-filter: blur(25px); 
+            border-radius: 20px; 
+            padding: 20px; 
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15); 
+            border: 1px solid rgba(255,255,255,0.8); 
+            opacity: 0; 
+            transform: translateY(20px) scale(0.9); 
+            pointer-events: none; 
+            transition: all 0.3s; 
+            transform-origin: bottom right; 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; /* PC端双列 */
+            gap: 20px; 
+        }
         .help-popup.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
         .help-header { font-weight:bold; margin-bottom:10px; color:#ff758c; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         .help-item { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.85rem; color: #555; align-items: center; }
@@ -388,6 +406,13 @@ app.get('/', (c) => {
         @media (max-width: 800px) { 
             .layout { grid-template-columns: 1fr; }
             
+            /* [修复] 移动端帮助弹窗单列显示 */
+            .help-popup {
+                grid-template-columns: 1fr; /* 单列 */
+                bottom: 80px;
+                right: -10px; /* 微调位置 */
+            }
+
             .mobile-toggle { 
                 display: flex !important; 
                 position: fixed; top: 15px; left: 15px; 
@@ -408,6 +433,8 @@ app.get('/', (c) => {
                 border-right: 1px solid rgba(0,0,0,0.05);
             }
             .sidebar.active { left: 0; }
+            
+            .timeline-node { padding: 5px 0; }
 
             .sidebar-overlay { 
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
@@ -591,15 +618,14 @@ app.get('/', (c) => {
           document.addEventListener('mousemove', handleGlobalMouseMove);
           checkPermalink();
           
-          // [新增] 监听输入框自动高度
+          // 监听输入框自动高度
           const textarea = document.getElementById('post-content');
           textarea.addEventListener('input', () => autoResize(textarea));
         }
 
-        // [新增] 自动调整高度函数
         function autoResize(el) {
-            el.style.height = 'auto'; // 先重置高度
-            el.style.height = el.scrollHeight + 'px'; // 再设置为内容高度
+            el.style.height = 'auto'; 
+            el.style.height = el.scrollHeight + 'px'; 
         }
 
         function toggleSidebar() {
@@ -667,7 +693,7 @@ app.get('/', (c) => {
                 textarea.selectionStart = textarea.selectionEnd = start + text.length;
             }
             textarea.focus();
-            autoResize(textarea); // [新增] 插入文字后自动调整高度
+            autoResize(textarea); 
         }
 
         function checkSubmit(e) {
@@ -920,7 +946,6 @@ app.get('/', (c) => {
           const res = await fetch('/api/memos', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') }, body: JSON.stringify({ content, is_private: isPrivate }) });
           if(res.ok) { 
               document.getElementById('post-content').value = ''; 
-              // [新增] 发布后重置高度
               document.getElementById('post-content').style.height = 'auto';
               loadMemos(); 
               showToast('发布成功！🎉');
