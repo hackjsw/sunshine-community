@@ -7,7 +7,7 @@ type Bindings = {
   JWT_SECRET: string
 }
 
-const DEFAULT_SECRET = "sunshine-secret-key-2026-v26-help-popup-fix";
+const DEFAULT_SECRET = "sunshine-secret-key-2026-v31-pinned-feature";
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('/*', cors())
@@ -113,12 +113,14 @@ app.get('/api/auth/me', authRequired, async (c) => {
 app.get('/api/memos', async (c) => {
   const user = c.get('user');
   const query = c.req.query('q');
-  let sql = "SELECT m.id, m.content, m.tags, m.is_private, m.created_at, m.user_id, u.username, u.nickname, u.role as user_role FROM memos m LEFT JOIN users u ON m.user_id = u.id";
+  // [修改] 增加 is_pinned 字段查询
+  let sql = "SELECT m.id, m.content, m.tags, m.is_private, m.is_pinned, m.created_at, m.user_id, u.username, u.nickname, u.role as user_role FROM memos m LEFT JOIN users u ON m.user_id = u.id";
   let conditions = ["(m.is_private = 0 OR m.user_id = ?)"];
   let params: any[] = [user ? user.id : -1];
   if (query) { conditions.push("m.content LIKE ?"); params.push(`%${query}%`); }
   sql += " WHERE " + conditions.join(" AND ");
-  sql += " ORDER BY m.created_at DESC LIMIT 200";
+  // [关键修改] 排序逻辑：先按置顶降序(1在0前)，再按时间降序
+  sql += " ORDER BY m.is_pinned DESC, m.created_at DESC LIMIT 200";
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   return c.json(results);
 });
@@ -142,6 +144,19 @@ app.put('/api/memos/:id', authRequired, async (c) => {
   const tags = (content.match(/#[^\s#]+/g) || []).join(' ');
   await c.env.DB.prepare("UPDATE memos SET content = ?, tags = ? WHERE id = ?").bind(content, tags, id).run();
   return c.json({ success: true });
+});
+
+// [新增] 置顶切换接口
+app.put('/api/memos/:id/pin', authRequired, async (c) => {
+  const id = c.req.param('id');
+  const user = c.get('user');
+  const memo: any = await c.env.DB.prepare("SELECT user_id, is_pinned FROM memos WHERE id = ?").bind(id).first();
+  if (!memo) return c.json({ error: '不存在' }, 404);
+  if (String(memo.user_id) !== String(user.id) && user.role !== 'admin') return c.json({ error: '无权' }, 403);
+  
+  const newState = memo.is_pinned === 1 ? 0 : 1;
+  await c.env.DB.prepare("UPDATE memos SET is_pinned = ? WHERE id = ?").bind(newState, id).run();
+  return c.json({ success: true, is_pinned: newState });
 });
 
 app.delete('/api/memos/:id', authRequired, async (c) => {
@@ -174,6 +189,8 @@ app.get('/', (c) => {
           --primary: #fda085;
           --primary-grad: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
           --light-color: rgba(255, 250, 240, 0.5); 
+          --pinned-bg: rgba(255, 253, 230, 0.85); /* 置顶卡片背景色 */
+          --pinned-border: #f6d365;
         }
         * { box-sizing: border-box; }
         
@@ -240,9 +257,8 @@ app.get('/', (c) => {
         }
         .timeline-node:hover::after { background: var(--primary); transform: scale(1.2); }
 
-        /* 内容区 */
         .main-content { 
-          padding: 40px 60px 100px 30px; 
+          padding: 40px 60px 100px 80px; 
           z-index: 2; 
           height: 100vh;
           overflow-y: auto; 
@@ -250,10 +266,7 @@ app.get('/', (c) => {
           scrollbar-width: none; 
           -ms-overflow-style: none; 
         }
-        
-        .main-content::-webkit-scrollbar {
-            display: none; 
-        }
+        .main-content::-webkit-scrollbar { display: none; }
 
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
         .logo { font-size: 1.5rem; font-weight: bold; color: #333; letter-spacing: 1px; }
@@ -329,6 +342,20 @@ app.get('/', (c) => {
           border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 10px 30px rgba(0,0,0,0.05); position: relative; transition: transform 0.2s;
           overflow: visible; 
         }
+        
+        /* [新增] 置顶卡片特殊样式 */
+        .glass-card.pinned {
+            border: 2px solid var(--pinned-border);
+            background: var(--pinned-bg);
+        }
+        /* 置顶图标 */
+        .pin-badge {
+            position: absolute; top: -10px; right: -10px; 
+            width: 30px; height: 30px; background: var(--primary); color:white;
+            border-radius: 50%; display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2); font-size: 1.2rem; transform: rotate(45deg); z-index: 5;
+        }
+
         .glass-card-inner { padding: 24px; position:relative; z-index:2; }
         
         .glass-card::after {
@@ -341,16 +368,61 @@ app.get('/', (c) => {
         .glass-card.highlight { animation: flashHighlight 1.5s ease-out; border-color: var(--primary); }
         @keyframes flashHighlight { 0% { box-shadow: 0 0 0 0 var(--primary); } 50% { box-shadow: 0 0 20px 5px var(--primary); } 100% { box-shadow: 0 10px 30px rgba(0,0,0,0.05); } }
 
-        .editor-area { width: 100%; min-height: 120px; border: none; background: transparent; font-family: inherit; font-size: 1.1rem; color: #333; outline: none; resize: none; overflow-y: hidden; padding: 10px; margin-top: 0;}
+        .editor-area { 
+            width: 100%; 
+            min-height: 120px; 
+            height: auto; 
+            border: none; background: transparent; 
+            font-family: inherit; font-size: 1.1rem; color: #333; 
+            outline: none; resize: none; overflow: hidden; 
+            padding: 10px; margin-top: 0;
+        }
         .editor-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; border-top: 1px dashed rgba(0,0,0,0.1); padding-top: 15px; }
         
         .memo-meta { display: flex; justify-content: space-between; font-size: 0.85rem; color: #888; margin-bottom: 12px; align-items: center; }
         .user-badge { background: #fff; padding: 4px 10px; border-radius: 12px; font-weight: bold; color: #555; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 6px;}
         .admin-badge { color: #f59e0b; }
         .lock-icon { font-size: 0.8em; margin-left: 5px; color: #999; }
+        
+        .memo-content { 
+            position: relative;
+            line-height: 1.6;
+            transition: max-height 0.3s cubic-bezier(0, 1, 0, 1);
+        }
+        .memo-content.collapsed {
+            max-height: 180px; 
+            overflow: hidden;
+            mask-image: linear-gradient(#000 70%, transparent); 
+            -webkit-mask-image: linear-gradient(#000 70%, transparent);
+        }
+        .memo-content.expanded {
+            max-height: 2000px;
+            mask-image: none;
+            -webkit-mask-image: none;
+        }
+
+        .read-more-btn {
+            text-align: center; font-size: 0.85rem; color: var(--primary); 
+            font-weight: bold; cursor: pointer; margin-top: 5px; padding: 5px;
+            display: none; 
+        }
+        .read-more-btn:hover { text-decoration: underline; }
+
         .memo-content img { max-width: 100%; border-radius: 8px; margin: 10px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .memo-content blockquote { border-left: 4px solid var(--primary); background: rgba(255,255,255,0.5); margin: 5px 0; padding: 8px 12px; color: #666; border-radius: 0 8px 8px 0; }
         
+        .memo-tag { color: #ff758c; font-weight: bold; cursor: pointer; padding: 0 2px; transition: 0.2s; }
+        .memo-tag:hover { background: #ffe0e6; border-radius: 4px; text-decoration: none; }
+
+        .tags-footer {
+            display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px; border-top: 1px dashed rgba(0,0,0,0.1); padding-top: 10px;
+        }
+        .tag-pill {
+            font-size: 0.8rem; background: rgba(255, 117, 140, 0.1); color: #ff758c; 
+            padding: 4px 10px; border-radius: 20px; cursor: pointer; transition: 0.2s; font-weight:bold;
+        }
+        .tag-pill:hover { background: #ff758c; color: white; transform: translateY(-2px); box-shadow: 0 2px 5px rgba(255, 117, 140, 0.3); }
+
         .actions { opacity: 0; transition: 0.2s; display: flex; gap: 15px; position: relative; z-index: 20; }
         .glass-card:hover .actions { opacity: 1; }
         .action-btn { cursor: pointer; font-size: 0.85rem; color: #999; font-weight: bold; display: flex; align-items: center; gap:4px; }
@@ -375,11 +447,9 @@ app.get('/', (c) => {
         .help-btn { width: 50px; height: 50px; border-radius: 50%; background: var(--primary-grad); color: white; font-size: 24px; font-weight: bold; border: none; cursor: pointer; box-shadow: 0 4px 15px rgba(253, 160, 133, 0.5); display: flex; justify-content: center; align-items: center; transition: transform 0.3s; animation: pulse 3s infinite; }
         .help-btn:hover { transform: scale(1.1) rotate(10deg); }
         
-        /* [修复] 帮助弹窗样式 */
         .help-popup { 
             position: absolute; bottom: 70px; right: 0; 
-            width: 450px; /* PC默认宽度 */
-            max-width: 85vw; /* 关键：最大宽度不超过屏幕85% */
+            width: 450px; max-width: 85vw;
             background: rgba(255, 255, 255, 0.98); 
             backdrop-filter: blur(25px); 
             border-radius: 20px; 
@@ -392,7 +462,7 @@ app.get('/', (c) => {
             transition: all 0.3s; 
             transform-origin: bottom right; 
             display: grid; 
-            grid-template-columns: 1fr 1fr; /* PC端双列 */
+            grid-template-columns: 1fr 1fr; 
             gap: 20px; 
         }
         .help-popup.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
@@ -406,12 +476,7 @@ app.get('/', (c) => {
         @media (max-width: 800px) { 
             .layout { grid-template-columns: 1fr; }
             
-            /* [修复] 移动端帮助弹窗单列显示 */
-            .help-popup {
-                grid-template-columns: 1fr; /* 单列 */
-                bottom: 80px;
-                right: -10px; /* 微调位置 */
-            }
+            .help-popup { grid-template-columns: 1fr; bottom: 80px; right: -10px; }
 
             .mobile-toggle { 
                 display: flex !important; 
@@ -508,7 +573,11 @@ app.get('/', (c) => {
               <div id="emoji-picker" class="emoji-picker" style="display:none"></div>
 
               <div class="glass-card-inner">
-                <textarea id="post-content" class="editor-area" placeholder="记录当下的时光... (Ctrl + Enter 发送)" onkeydown="checkSubmit(event)"></textarea>
+                <textarea id="post-content" class="editor-area" 
+                    placeholder="记录当下的时光... (Ctrl + Enter 发送)" 
+                    onkeydown="checkSubmit(event)" 
+                    oninput="autoResize(this)"
+                    style="overflow:hidden"></textarea>
                 <div class="editor-footer">
                   <label class="switch-label" title="Private Memory">
                     <input type="checkbox" id="post-private" class="switch-input">
@@ -618,19 +687,44 @@ app.get('/', (c) => {
           document.addEventListener('mousemove', handleGlobalMouseMove);
           checkPermalink();
           
-          // 监听输入框自动高度
           const textarea = document.getElementById('post-content');
-          textarea.addEventListener('input', () => autoResize(textarea));
+          if(textarea) autoResize(textarea);
         }
 
+        // 自动调整高度
         function autoResize(el) {
             el.style.height = 'auto'; 
-            el.style.height = el.scrollHeight + 'px'; 
+            el.style.height = (el.scrollHeight) + 'px'; 
         }
 
         function toggleSidebar() {
             document.querySelector('.sidebar').classList.toggle('active');
             document.querySelector('.sidebar-overlay').classList.toggle('active');
+        }
+
+        // 切换折叠/展开
+        function toggleExpand(id) {
+            const content = document.getElementById(\`content-\${id}\`);
+            const btn = document.getElementById(\`btn-expand-\${id}\`);
+            content.classList.toggle('expanded');
+            content.classList.toggle('collapsed');
+            
+            if (content.classList.contains('expanded')) {
+                btn.innerText = '收起 (Collapse)';
+            } else {
+                btn.innerText = '展开 (Read More)';
+            }
+        }
+
+        // 检查是否需要折叠
+        function checkOverflow() {
+            document.querySelectorAll('.memo-content').forEach(el => {
+                if (el.scrollHeight > 180) {
+                    el.classList.add('collapsed');
+                    const btn = document.getElementById(el.id.replace('content-', 'btn-expand-'));
+                    if (btn) btn.style.display = 'block';
+                }
+            });
         }
 
         function initEmojiPicker() {
@@ -792,6 +886,12 @@ app.get('/', (c) => {
             const query = document.querySelector('.search-box input').value;
             renderList(allMemos, query);
         }
+        
+        function filterByTag(tag) {
+            const searchBox = document.querySelector('.search-box input');
+            searchBox.value = tag;
+            handleSearch(tag);
+        }
 
         async function loadMemos(query = '') {
           const headers = {};
@@ -818,8 +918,12 @@ app.get('/', (c) => {
           if(filteredData.length === 0) { container.innerHTML = '<div style="text-align:center; color:#999; margin-top:40px;">暂无记忆...</div>'; return; }
 
           filteredData.forEach(memo => {
+            const isPinned = memo.is_pinned === 1;
+            const pinnedClass = isPinned ? 'pinned' : '';
+            const pinBadge = isPinned ? '<div class="pin-badge">📌</div>' : '';
+            
             const card = document.createElement('div');
-            card.className = 'glass-card';
+            card.className = \`glass-card \${pinnedClass}\`;
             card.id = \`memo-\${memo.id}\`; 
             
             const time = new Date(memo.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute:'2-digit' });
@@ -833,10 +937,17 @@ app.get('/', (c) => {
 
             const displayName = memo.nickname || memo.username;
 
+            // [新增] 置顶按钮
+            let pinBtn = '';
+            if (isMine) {
+               pinBtn = \`<span class="action-btn" onclick="togglePin(\${memo.id})">\${isPinned ? 'Unpin' : 'Pin'}</span>\`;
+            }
+
             let actions = '';
             if (isMine) {
               actions = \`
                 <div class="actions">
+                  \${pinBtn}
                   <span class="action-btn" onclick="enableEdit(\${memo.id})">Edit</span>
                   <span class="action-btn" onclick="deleteMemo(\${memo.id})">Del</span>
                   <span class="action-btn" onclick="shareMemo(\${memo.id})">Share</span>
@@ -847,15 +958,31 @@ app.get('/', (c) => {
             }
 
             let rawContent = memo.content;
+            
+            const tags = rawContent.match(/(^|\\s)#([\\w\\u4e00-\\u9fa5]+)(?!\\w)/g) || [];
+            const uniqueTags = [...new Set(tags.map(t => t.trim().replace(/^#/, '')))];
+            
+            let tagsHtml = '';
+            if (uniqueTags.length > 0) {
+                tagsHtml = '<div class="tags-footer">' + 
+                    uniqueTags.map(t => \`<span class="tag-pill" onclick="event.stopPropagation(); filterByTag('#\${t}')">#\${t}</span>\`).join('') +
+                    '</div>';
+            }
+
             if(query) rawContent = rawContent.replace(new RegExp(\`(\${query})\`, 'gi'), '<mark>$1</mark>');
+            
+            rawContent = rawContent.replace(/(\\s|^)#([\\w\\u4e00-\\u9fa5]+)(?!\\w)/g, '$1<span class="memo-tag" onclick="event.stopPropagation(); filterByTag(\\'#$2\\')">#$2</span>');
             
             card.innerHTML = \`
               <div class="glass-card-inner">
+                \${pinBadge}
                 <div class="memo-meta">
                   <div class="user-badge"><img src="https://ui-avatars.com/api/?name=\${displayName}&background=random&size=20&rounded=true" style="margin:0; width:18px; height:18px; border-radius:50%"> \${displayName} \${badge}</div>
                   <div>\${time}</div>
                 </div>
                 <div class="memo-content" id="content-\${memo.id}">\${marked.parse(rawContent)}</div>
+                <div class="read-more-btn" id="btn-expand-\${memo.id}" onclick="toggleExpand(\${memo.id})">展开 (Read More)</div>
+                \${tagsHtml}
                 \${actions}
               </div>
             \`;
@@ -864,6 +991,8 @@ app.get('/', (c) => {
             card.style.setProperty('--mx', '50%');
             card.style.setProperty('--my', '50%');
           });
+          
+          checkOverflow();
         }
 
         function shareMemo(id) {
@@ -871,18 +1000,44 @@ app.get('/', (c) => {
             navigator.clipboard.writeText(url).then(() => { showToast('链接已复制到剪贴板 🔗'); });
         }
 
+        // [新增] 切换置顶状态
+        async function togglePin(id) {
+            const res = await fetch(\`/api/memos/\${id}/pin\`, { method: 'PUT', headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+            if (res.ok) {
+                await loadMemos();
+                showToast('置顶状态已更新 📌');
+            } else {
+                alert('操作失败');
+            }
+        }
+
         function enableEdit(id) {
           const memo = allMemos.find(m => m.id === id);
           if(!memo) return;
           const contentDiv = document.getElementById(\`content-\${id}\`);
-          contentDiv.innerHTML = \`<div class="edit-wrapper"><textarea id="edit-area-\${id}">\${memo.content}</textarea><div class="btn-group"><button class="cancel-btn" onclick="loadMemos()">Cancel</button><button class="save-btn" onclick="saveEdit(\${id})">Save</button></div></div>\`;
+          contentDiv.className = 'memo-content'; 
+          contentDiv.style.maxHeight = 'none';
+          
+          contentDiv.parentElement.innerHTML = \`<div class="edit-wrapper"><textarea id="edit-area-\${id}" oninput="autoResize(this)">\${memo.content}</textarea><div class="btn-group"><button class="cancel-btn" onclick="loadMemos()">Cancel</button><button class="save-btn" onclick="saveEdit(\${id})">Save</button></div></div>\`;
+          
+          const textarea = document.getElementById(\`edit-area-\${id}\`);
+          autoResize(textarea);
         }
 
         async function saveEdit(id) {
            const newContent = document.getElementById(\`edit-area-\${id}\`).value;
            if(!newContent) return;
            const res = await fetch(\`/api/memos/\${id}\`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + localStorage.getItem('token') }, body: JSON.stringify({ content: newContent }) });
-           if(res.ok) { loadMemos(); showToast('保存成功 ✅'); } else alert('保存失败');
+           if(res.ok) { 
+               await loadMemos(); 
+               const el = document.getElementById(\`memo-\${id}\`);
+               if(el) {
+                   el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+                   el.classList.add('highlight');
+                   setTimeout(() => el.classList.remove('highlight'), 1000);
+               }
+               showToast('保存成功 ✅'); 
+           } else alert('保存失败');
         }
 
         async function openAdminPanel() {
